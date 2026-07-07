@@ -2,56 +2,87 @@
 
 namespace App\Jobs;
 
-use App\Models\Order;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
- 
 
 class DailySalesBatchJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct()
+    public $timeout = 600;
+
+    public function __construct() {}
+
+    public function handle()
     {
+        Log::info("=== بدء معالجة دفعات التقارير من جدول المبيعات المؤرشفة ===");
 
-    }
+        $totalDailyRevenue = 0;
+        $totalProcessedOrders = 0;
+        $csvRows = [];
 
-    public function handle(): void
-    {
-        $fileName = 'reports/sales_report_' . date('Y-m-d_H-i-s') . '.txt';
-        
-        Storage::disk('local')->put($fileName, "=== REAL TIME BATCH SALES REPORT ===\n\n");
-        Storage::disk('local')->append($fileName, "Order ID | User ID | Product ID | Total Price | Status\n");
-        Storage::disk('local')->append($fileName, "--------------------------------------------------------\n");
+        $csvRows[] = ['Sale ID', 'Order ID', 'User ID', 'Product ID', 'Product Name', 'Quantity', 'Price Per Unit', 'Total Price', 'Sale Date'];
 
-        $chunkIndex = 1;
-        $totalOrders = 0;
+        DB::table('archived_sales')
+            ->where('sale_date', now()->toDateString()) 
+            ->chunkById(100, function ($sales) use (&$totalDailyRevenue, &$totalProcessedOrders, &$csvRows) {
+                
+                foreach ($sales as $sale) {
+                    $totalDailyRevenue += $sale->total_price;
+                    $totalProcessedOrders++;
 
-        Order::where('status', 'completed')->chunk(2, function ($ordersBatch) use ($fileName, &$chunkIndex, &$totalOrders) {
-            
-            $textLines = "";
-            foreach ($ordersBatch as $order) {
-                $textLines .= "#{$order->id} | User: {$order->user_id} | Product: {$order->product_id} | {$order->total_price} | {$order->status}\n";
-                $totalOrders++;
-            }
-            Storage::disk('local')->append($fileName, $textLines);
+                    $csvRows[] = [
+                        $sale->id,
+                        $sale->order_id,
+                        $sale->user_id,
+                        $sale->product_id,
+                        $sale->product_name,
+                        $sale->quantity,
+                        $sale->price_per_unit,
+                        $sale->total_price,
+                        $sale->sale_date
+                    ];
+                }
+            });
 
-            Order::whereIn('id', $ordersBatch->pluck('id'))->update(['status' => 'archived']);
-
-            echo ">>> [Batch Chunk #{$chunkIndex}]: Saved " . $ordersBatch->count() . " orders to disk.\n";
-            $chunkIndex++;
-        });
-
-        if ($totalOrders > 0) {
-            echo "\n[Success]: Mega Sales Report file created at: storage/app/{$fileName}\n";
-        } else {
-            Storage::disk('local')->delete($fileName);
-            echo "\n>>> Batch Finished \n";
+        if ($totalProcessedOrders === 0) {
+            Log::info("لا توجد مبيعات مؤرشفة اليوم لتوليد تقرير لها.");
+            return;
         }
+
+        $fileName = 'reports/sales_report_' . now()->format('Y_m_d') . '.csv';
+        
+        $handle = fopen('php://temp', 'r+');
+        foreach ($csvRows as $row) {
+            fputcsv($handle, $row);
+        }
+        rewind($handle);
+        $csvContent = stream_get_contents($handle);
+        fclose($handle);
+
+        Storage::disk('local')->put($fileName, $csvContent);
+        Log::info("تم تصدير ملف الـ CSV القياسي بنجاح في: " . $fileName);
+
+        DB::table('reports')->updateOrInsert(
+            ['report_date' => now()->toDateString()], 
+            [
+                'total_revenue' => $totalDailyRevenue,
+                'total_orders'  => $totalProcessedOrders,
+                'file_path'     => $fileName,
+                'created_at'    => now(),
+                'updated_at'    => now()
+            ]
+        );
+
+        Cache::forget('sales_report_' . now()->toDateString());     
+
+        Log::info("=== تم تحديث جدول reports بنجاح وحفظ مخرجات الجرد القياسي ===");
     }
 }

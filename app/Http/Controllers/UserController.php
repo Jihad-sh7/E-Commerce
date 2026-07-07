@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
 {
@@ -28,7 +29,7 @@ class UserController extends Controller
     }
 
      public function login(LoginUserRequest $request)
-    {
+    {   Log::info('JMeter Request Data:', $request->all());
          if(!Auth::attempt($request->only('email','password'))){
         return response()->json([
         'message'=>'invailed email or password'
@@ -53,5 +54,5 @@ class UserController extends Controller
     }
     
     
-//////////////////
+/// 
 }

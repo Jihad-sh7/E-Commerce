@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Order;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -14,25 +15,19 @@ class OrderNotificationJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * Create a new job instance.
-     */
+    protected $order;
+    protected $user;
 
-    protected $order; 
-
-    public function __construct(Order $order)
+    public function __construct(Order $order, User $user)
     {
-        $this->order = $order; 
+        $this->order = $order;
+        $this->user = $user;
     }
 
-    /**
-     * Execute the job.
-     */
-    public function handle(): void
+    public function handle()
     {
         sleep(1); 
 
-        Log::info("📨 [Async Notification]: Notification dispatched for User: " . $this->order->user_id);
-        echo ">>> [Async Success]: Invoice created & Notification sent for Order ID: " . $this->order->id . "\n";
+        Log::channel('single')->info(" [Asynchronous Queue Success]: Notification sent successfully to User: {$this->user->name} (Email: {$this->user->email}) for Order ID: #{$this->order->id}. Total Charged: {${$this->order->total_price}}");
     }
 }

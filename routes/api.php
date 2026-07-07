@@ -24,7 +24,6 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
-
 Route::post('register',[UserController::class,'register']);
 Route::post('login',[UserController::class,'login']);
 
@@ -33,9 +32,17 @@ Route::middleware('auth:sanctum')->group(function(){
 Route::post('logout',[UserController::class,'logout']);
 
 Route::get('products',[ProductController::class,'index']);
+Route::get('/products/{id}', [ProductController::class, 'showProduct']); 
+Route::post('products', [ProductController::class, 'storeProduct']);
+Route::put('/products/{id}', [ProductController::class, 'updateProduct']);
+Route::delete('/products/{id}', [ProductController::class, 'destroyProduct']);
+
 
 Route::post('/purchase/pessimistic', [OrderController::class, 'purchasePessimistic']);
 Route::post('/purchase/optimistic', [OrderController::class, 'purchaseOptimistic']);
+
+Route::get('/reports/sales', [OrderController::class, 'generateSalesReport']);
+Route::get('/reports/download/{date}', [OrderController::class, 'downloadSalesReport']); 
 });
 
 
