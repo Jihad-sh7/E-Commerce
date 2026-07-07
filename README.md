@@ -1,66 +1,52 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# طلب 9: محاكاة 100 مستخدم (JMeter + Grafana)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## شو هاد الملف؟
+`100-users-load-test.jmx` هو ملف JMeter (Test Plan خارجي، منفصل تماماً عن مشروع Laravel) بيحاكي **100 مستخدم متزامن**، كل واحد بينفّذ 5 جولات (Loops) عبيضربوا فيها **كل العمليات** الموجودة بالمشروع بالترتيب:
 
-## About Laravel
+1. تسجيل دخول (`POST /api/login`) → استخراج التوكن أوتوماتيكياً
+2. لائحة المنتجات (`GET /api/products`) → يختبر كاش `active_products_list`
+3. منتج مفرد (`GET /api/products/{id}`) → يختبر كاش `product_{id}`
+4. شراء Pessimistic (`POST /api/purchase/pessimistic`) → يضرب نفس المنتج بـ 100 ثريد بنفس اللحظة، يختبر `lockForUpdate`
+5. شراء Optimistic (`POST /api/purchase/optimistic`) → لمقارنة الأداء مع الأعلى تحت نفس الحمل
+6. توليد تقرير المبيعات (`GET /api/reports/sales`) → يختبر الـ Distributed Lock تبع `DailySalesBatchJob`
+7. قراءة نتيجة التقرير (`GET /api/reports/download/{date}`) → يختبر كاش `sales_report_{date}`
+8. Load Balancer (`GET /load-balancer/products`) → يختبر الـ Distributed Lock تبع pointer الـ Round Robin
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## قبل ما تشغّلوا الاختبار
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+1. **سيدوا مستخدم اختباري** برصيد كافي (مثلاً 1,000,000) وعدّلوا `EMAIL`/`PASSWORD` بالـ Test Plan (User Defined Variables) ليطابقوه.
+2. **سيدوا منتج** (`PRODUCT_ID=1` افتراضياً) بمخزون كبير لو بدكن تقيسوا الأداء البحت بدون فشل (مثلاً `stock = 100000`). إذا تركتوا المخزون منخفض، الاختبار رح يطلع أخطاء "المخزون غير كاف" بطلبات كتير — وهاد بالحقيقة **مطلوب ومتوقع**: لازم يثبت إنو ما في Overselling حتى تحت ضغط 100 مستخدم بنفس اللحظة (تماماً مثال Concert Seat Booking بـ Session 7).
+3. شغّلوا سيرفر Laravel: `php artisan serve --port=8000` (أو حسب البورت يلي حطيتوه بـ Test Plan).
+4. تأكدوا `CACHE_DRIVER=redis` بـ `.env` حتى الـ Distributed Locks (طلب 7) تشتغل فعلياً.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## تشغيل الاختبار (Command Line - أدق من الـ GUI للقياس الحقيقي)
 
-## Learning Laravel
+```bash
+jmeter -n -t 100-users-load-test.jmx -l results.jtl -e -o ./html-report
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- `-n` : Non-GUI mode (أدق وأخف على الـ CPU، الـ GUI بنفسه بياخد موارد وبيأثر عالأرقام)
+- `-l results.jtl` : ملف نتائج خام
+- `-e -o ./html-report` : يولّد تقرير HTML تلقائي فيه Throughput/Latency/Error % (نفس الأعمدة الثلاثة تبع Session 8)
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+افتحوا `./html-report/index.html` وبتلاقوا فيه فعلياً نفس مفاهيم Session 8: **Throughput, Latency (P90/P95/P99), Error Rate**.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains over 2000 video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## ربط Grafana (Dashboard حي وقت التشغيل)
 
-## Laravel Sponsors
+```bash
+cd load-test
+docker-compose up -d
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the Laravel [Patreon page](https://patreon.com/taylorotwell).
+هاد رح يشغّل:
+- **InfluxDB** على `localhost:8086` (قاعدة بيانات `jmeter` جاهزة)
+- **Grafana** على `localhost:3000` (admin / admin)
 
-### Premium Partners
+بعدين:
+1. بملف الـ Test Plan، فعّلوا عنصر **"InfluxDB Backend Listener (for Grafana)"** (غيّروا `enabled="false"` لـ `enabled="true"`، أو من GUI كبسة يمين → Toggle).
+2. بـ Grafana: Connections → Data Sources → Add → InfluxDB → URL: `http://localhost:8086` → Database: `jmeter` → Save & Test.
+3. استوردوا Dashboard جاهز خاص بـ JMeter: Dashboards → Import → ID **5496** (JMeter Load Test Dashboard, متوفر على grafana.com).
+4. شغّلوا الاختبار، وبتشوفوا الأرقام عم تتحدث Live بالـ Dashboard وقت التنفيذ.
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Cubet Techno Labs](https://cubettech.com)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[Many](https://www.many.co.uk)**
-- **[Webdock, Fast VPS Hosting](https://www.webdock.io/en)**
-- **[DevSquad](https://devsquad.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[OP.GG](https://op.gg)**
-- **[WebReinvent](https://webreinvent.com/?utm_source=laravel&utm_medium=github&utm_campaign=patreon-sponsors)**
-- **[Lendio](https://lendio.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## ملاحظة مهمة لطلب 10
+نتائج هاد الاختبار (`html-report` أو Aggregate Report) هي بالضبط الأرقام يلي رح نستخدمها لطلب 10: نحدد العملية الأكثر اختناقاً (الأعلى Latency/الأكثر Error Rate)، نطبق التحسين المناسب عليها، ونعيد تشغيل نفس الاختبار للمقارنة قبل/بعد رقمياً.
